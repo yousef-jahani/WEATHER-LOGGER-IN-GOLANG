@@ -5,30 +5,39 @@ import (
 	"net/http"
 	"os"
 	"sync"
+
+	
 )
 
 
 var mu sync.Mutex
-var reportsList []string
+var wg sync.WaitGroup
+var reportChannel chan string
 
-func reports()  {
-	mu.Lock()
-	defer mu.Unlock()
-	file, err := os.OpenFile("reports.txt",os.O_APPEND | os.O_CREATE |os.O_WRONLY,0644)
-	if err != nil {
-		fmt.Println("error in creating file")
-		return
+
+func reportWorker()  {
+	for report := range reportChannel {
+		mu.Lock()
+
+		file,err := os.OpenFile("reports.txt",os.O_APPEND | os.O_CREATE | os.O_WRONLY,0644)
+		if err != nil {
+			fmt.Println("error in creating file : ",err)
+			continue
+		}
+
+		fmt.Fprintln(file,report)
+		file.Close()
+
+		mu.Unlock()
+		wg.Done()
 	}
-	defer file.Close()
-
-	for i,r := range reportsList{
-		fmt.Fprintf(file,"%d. %s \n",i+1,r)
-	}
-
-	fmt.Println("reports added successfully")
 }
+
 func main()  {
 	fmt.Println("server running on localhost : 8000")
+
+	reportChannel = make(chan string , 10)
+	go reportWorker()
 
 	http.HandleFunc("/home",func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -51,12 +60,10 @@ func main()  {
 
 			report := fmt.Sprintf("the weather for %s is 27C",city)
 
-			mu.Lock()
-			reportsList = append(reportsList,report)
-			mu.Unlock()
+			wg.Add(1)
+			reportChannel <- report
 
-			fmt.Fprintln(w,report)
-			reports()
+			fmt.Fprintln(w,report)		
 
 		} else {
 			http.Error(w,"only post allowed",http.StatusMethodNotAllowed)
@@ -76,11 +83,14 @@ func main()  {
 				return
 			} 
 			fmt.Fprintln(w,string(data))
-			
+		
 		} else {
 			http.Error(w,"only get method allowed",http.StatusMethodNotAllowed)
 		}
 	})
+
 	
+
 	http.ListenAndServe(":8000",nil)
+	
 }
